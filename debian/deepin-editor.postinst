@@ -1,3 +1,0 @@
-#! /bin/bash
-
-ln -s -f /usr/bin/deepin-editor /usr/bin/dedit
