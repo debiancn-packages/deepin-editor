@@ -22,6 +22,8 @@
 
 #include "dbusinterface.h"
 #include "dtextedit.h"
+#include "widgets/bottombar.h"
+#include "widgets/toast.h"
 
 #include <QVBoxLayout>
 #include <QWidget>
@@ -31,34 +33,65 @@ class EditWrapper : public QWidget
     Q_OBJECT
 
 public:
+    // end of line mode.
+    enum EndOfLineMode {
+        eolUnknown = -1,
+        eolUnix = 0,
+        eolDos = 1,
+        eolMac = 2
+    };
+
+    struct FileStateItem {
+        QDateTime modified;
+        QFile::Permissions permissions;
+    };
+
     EditWrapper(QWidget *parent = 0);
     ~EditWrapper();
 
     void openFile(const QString &filepath);
-    bool saveFile(const QString &encode, const QString &newline);
     bool saveFile();
     void updatePath(const QString &file);
-    QByteArray fileEncode() { return m_fileEncode; }
+    void refresh();
     bool isLoadFinished() { return m_isLoadFinished; }
-    bool isWritable() { return m_isWritable; }
 
+    EndOfLineMode endOfLineMode();
+    void setEndOfLineMode(EndOfLineMode eol);
+    void setTextCodec(QTextCodec *codec, bool reload = false);
+
+    BottomBar *bottomBar() { return m_bottomBar; }
+    QString filePath() { return m_textEdit->filepath; }
     DTextEdit *textEditor() { return m_textEdit; }
+    bool toastVisible() { return m_toast->isVisible(); }
+    void hideToast();
+
+    void checkForReload();
+    void initToastPosition();
+
+signals:
+    void requestSaveAs();
 
 private:
-    void detectNewline();
+    void detectEndOfLine();
+    void handleCursorModeChanged(DTextEdit::CursorMode mode);
+    void handleHightlightChanged(const QString &name);
     void handleFileLoadFinished(const QByteArray &encode, const QString &content);
+
+protected:
+    void resizeEvent(QResizeEvent *);
 
 private:
     QHBoxLayout *m_layout;
     DTextEdit *m_textEdit;
-    QByteArray m_fileEncode;
+    BottomBar *m_bottomBar;
+    QTextCodec *m_textCodec;
 
-    bool m_saveFinish;
-    int m_autoSaveInternal;
-    bool m_hasLoadFile = false;
-    bool m_isWritable = false;
-    bool m_isLoadFinished = true;
-    QString m_newline;
+    EndOfLineMode m_endOfLineMode;
+    bool m_isLoadFinished;
+    QDateTime m_modified;
+    Toast *m_toast;
+
+    bool m_isRefreshing;
 };
 
 #endif

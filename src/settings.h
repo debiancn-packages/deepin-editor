@@ -41,6 +41,7 @@ public:
     ~Settings();
 
     void dtkThemeWorkaround(QWidget *parent, const QString &theme);
+    static QWidget *createFontComBoBoxHandle(QObject *obj);
 
     int defaultFontSize = 12;
     int maxFontSize = 50;
@@ -52,6 +53,8 @@ signals:
     void adjustFont(QString name);
     void adjustFontSize(int fontSize);
     void adjustTabSpaceNumber(int number);
+    void adjustWordWrap(bool enable);
+    void themeChanged(const QString &theme);
 
 private:
     void updateAllKeysWithKeymap(QString keymap);

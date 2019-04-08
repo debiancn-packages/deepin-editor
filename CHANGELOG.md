@@ -1,3 +1,232 @@
+<a name="1.2.7"></a>
+## 1.2.7 (2019-03-27)
+
+
+
+
+<a name="1.2.6.3"></a>
+## 1.2.6.3 (2019-01-25)
+
+
+
+
+<a name="1.2.6.2"></a>
+## 1.2.6.2 (2019-01-15)
+
+
+#### Bug Fixes
+
+*   chinese garbled ([75f76e68](https://github.com/linuxdeepin/deepin-editor/commit/75f76e68ced88d58a9ade66b974c835ea5cf3001))
+
+
+
+<a name="1.2.6.1"></a>
+## 1.2.6.1 (2019-01-10)
+
+
+#### Bug Fixes
+
+*   disconnect when object got destroyed ([7fe6c1ef](https://github.com/linuxdeepin/deepin-editor/commit/7fe6c1efb56ce6294b3c5728eb9e1e8d0f4589c2))
+
+
+
+<a name=""></a>
+##  1.2.6 (2019-01-03)
+
+
+#### Features
+
+*   support x-wine-extension-ini ([a71e1415](https://github.com/linuxdeepin/deepin-editor/commit/a71e141553ab4308eb13fdb0cc7fe9e90d1096d7))
+* **textedit:**  optimized touch screen. ([b0bed762](https://github.com/linuxdeepin/deepin-editor/commit/b0bed7621d6676d95d80063ddf2259c79e449991))
+
+#### Bug Fixes
+
+*   open current file. ([b3fec2c8](https://github.com/linuxdeepin/deepin-editor/commit/b3fec2c8154618753df9b2517bc58e08280acfd1))
+*   do not accept rich text. ([5bbdea90](https://github.com/linuxdeepin/deepin-editor/commit/5bbdea905e5f7d418b60ad27178bffa0ab4b01ab))
+* **themepanel:**  optimize the selected effect. ([e4e04f20](https://github.com/linuxdeepin/deepin-editor/commit/e4e04f20408445dabde9aee2012cdf75937c7e19))
+
+
+
+<a name=""></a>
+##  1.2.5 (2018-12-21)
+
+
+#### Bug Fixes
+
+*   support m3u8 file open ([2af2d49c](https://github.com/linuxdeepin/deepin-editor/commit/2af2d49c2ad279313db00d412d674d8e24e03fee))
+*   dedit args. ([db75ba6b](https://github.com/linuxdeepin/deepin-editor/commit/db75ba6b5824fa962d32d6a3cd18d17d42623e74))
+*   save as file name format. ([e2a07a4c](https://github.com/linuxdeepin/deepin-editor/commit/e2a07a4cf73a509fac68bc2dafc70b31a6befe5f))
+
+#### Features
+
+*   support for application/x-mpegURL. ([a31ab8d0](https://github.com/linuxdeepin/deepin-editor/commit/a31ab8d03eb98dac58f1873dc4555ef1a1caa1d3))
+*   support for devanagari. ([865b2921](https://github.com/linuxdeepin/deepin-editor/commit/865b2921b804cbbd20e1400b5906500ce580aeaa))
+*   add dedit ([c282e683](https://github.com/linuxdeepin/deepin-editor/commit/c282e683b19f87c886ed75033688e7382540618c))
+
+
+
+<a name=""></a>
+##  1.2.4 (2018-12-18)
+
+
+#### Features
+
+* **tabbar:**  change read-only attribute. ([df24648c](https://github.com/linuxdeepin/deepin-editor/commit/df24648c0ddaf3a0370a20605cbf84f7ff4adaba))
+
+#### Bug Fixes
+
+*   save as crash. ([b7b50838](https://github.com/linuxdeepin/deepin-editor/commit/b7b508389b8f7431ba959d6dd831198a4a5b37e7))
+
+
+
+<a name=""></a>
+##  1.2.3 (2018-12-14)
+
+
+#### Bug Fixes
+
+*   reconnect save as signal ([68e7dd0a](https://github.com/linuxdeepin/deepin-editor/commit/68e7dd0a1b9edf3c80ed0e059dc0490d52ccfe41))
+
+
+
+<a name=""></a>
+##  1.2.2 (2018-12-14)
+
+
+#### Bug Fixes
+
+*   hide toast after refresh. ([c2b07f4f](https://github.com/linuxdeepin/deepin-editor/commit/c2b07f4f09bf50154ce33d930aa668309bf70d6a))
+*   save as file will be lost. ([b54f1c5f](https://github.com/linuxdeepin/deepin-editor/commit/b54f1c5fa994ad3bd1fbbf65e047c36a1b9cdcb2))
+*   draft file does not check reload. ([95e74191](https://github.com/linuxdeepin/deepin-editor/commit/95e7419176f2728f8d7780382b3aaa743528437e))
+
+#### Features
+
+*   monitor file removed. ([27c6b2ea](https://github.com/linuxdeepin/deepin-editor/commit/27c6b2ea9cfc8aec4cb905c584df56d8c502d346))
+*   support touch gesture. ([4160be0d](https://github.com/linuxdeepin/deepin-editor/commit/4160be0d46f4c2ce0a318d75fdb3e5632ff9ab00))
+
+
+
+<a name=""></a>
+##  1.2.1 (2018-12-11)
+
+
+
+
+<a name=""></a>
+##  1.2.0 (2018-12-11)
+
+
+#### Features
+
+*   monitor file modification. ([9dbde37d](https://github.com/linuxdeepin/deepin-editor/commit/9dbde37d7b8605401ad6c535e09c9e67e2a7abf6))
+* **settings_dialog:**  support for preview fonts. ([f49315ca](https://github.com/linuxdeepin/deepin-editor/commit/f49315ca991bde6547c16f5c6cf221721f8f45aa))
+
+#### Bug Fixes
+
+*   check reload crash. ([4eb94e7b](https://github.com/linuxdeepin/deepin-editor/commit/4eb94e7b605175dc69dc233f6894c03625dd4bb1))
+*   open duplicates. ([04ca82d2](https://github.com/linuxdeepin/deepin-editor/commit/04ca82d21f27290844cbde7431ea855c08b826f8))
+* **toast:**  adjust position when resize. ([4523ea74](https://github.com/linuxdeepin/deepin-editor/commit/4523ea7476690a238c17c0788d474d3652b6af6a))
+
+
+
+<a name=""></a>
+## 1.10 (2018-12-07)
+
+
+#### Bug Fixes
+
+*   drop down menu position ([5f458836](https://github.com/linuxdeepin/deepin-editor/commit/5f4588369b0f8368782ec4fed90b0c643ddcefa3))
+*   find matches highlight. ([807cf9dd](https://github.com/linuxdeepin/deepin-editor/commit/807cf9ddbca7b40272f651e9827f92f547cba20a))
+*   cannot find the end bracket to not need to highlight. ([716b1cc1](https://github.com/linuxdeepin/deepin-editor/commit/716b1cc1a4c1f39344425b84139b0b800e765853))
+*   settings dialog to restore default theme. ([89ef418b](https://github.com/linuxdeepin/deepin-editor/commit/89ef418b9e3b3551e4b7d2517d3735f32e22786f))
+*   switch theme update extension selection. ([b6b652d8](https://github.com/linuxdeepin/deepin-editor/commit/b6b652d8f1863ecc4c09eee349000ef9059ca334))
+*   update theme panel geometry ([29c4563c](https://github.com/linuxdeepin/deepin-editor/commit/29c4563c1e4c9b73bd5e428d375f76f70b5f161c))
+*   optimize find keyword color. ([adcae0e3](https://github.com/linuxdeepin/deepin-editor/commit/adcae0e31d631650cb77e0f46caa8ec4358d8fe7))
+*   draft modify codec. ([182cb4ef](https://github.com/linuxdeepin/deepin-editor/commit/182cb4efb7281a3c8f92f2ef178783562032be20))
+*   optimize bottom bar text color. ([53e7453c](https://github.com/linuxdeepin/deepin-editor/commit/53e7453cfd85c760d7ed875ad7a54f9c7342de8b))
+*   encode bobox adaptive width. ([1eecb09b](https://github.com/linuxdeepin/deepin-editor/commit/1eecb09b41181ab1b742a2101c00806084197d41))
+*   word wrap to line wrap. ([5f591a12](https://github.com/linuxdeepin/deepin-editor/commit/5f591a126cd90ad5348f906a1ae4a808051cd886))
+*   draft document save file name is incorrect. ([c2c1592d](https://github.com/linuxdeepin/deepin-editor/commit/c2c1592d7605b1fda2f2f437cfc8b4140ae6a530))
+*   highlight brackets will modify the document status. ([7aeec31b](https://github.com/linuxdeepin/deepin-editor/commit/7aeec31b77234e6bb5a0483ca809d7a8216f4c05))
+*   support for custom highlight bracket color. ([78d6528b](https://github.com/linuxdeepin/deepin-editor/commit/78d6528bfc98eca295237e44a13cb56c483da09d))
+*   highlight current line and highlight bracket conflicts. ([5db54adb](https://github.com/linuxdeepin/deepin-editor/commit/5db54adb6acc182ae20634b4b679c3bc698b4306))
+*   restore the value of the scrollbar when refresh. ([d453f875](https://github.com/linuxdeepin/deepin-editor/commit/d453f87513984749c41cebaf107bc9a46f81cd37))
+*   open crash ([5df794c7](https://github.com/linuxdeepin/deepin-editor/commit/5df794c76479dce5edaeb86fbc38b5fbcabe6db8))
+*   desktop file encoding detection error. ([57ad5195](https://github.com/linuxdeepin/deepin-editor/commit/57ad5195cac518ebb4e76a2a365787ef6016d3ba))
+*   theme panel y offset value. ([1c5f6b9f](https://github.com/linuxdeepin/deepin-editor/commit/1c5f6b9fa0c785ce9eac6102bed3141dd47ae44f))
+*   optimize theme panel popup. ([ce01f2fa](https://github.com/linuxdeepin/deepin-editor/commit/ce01f2faf667496c4ed2196fc4b370a01aeab2c9))
+*   cursor is incorrect. ([a8ffa9f6](https://github.com/linuxdeepin/deepin-editor/commit/a8ffa9f6a92e2cf771a9a1cdf2f9ecbed12183df))
+*   exit file dialog causes window to close. ([74f01aaf](https://github.com/linuxdeepin/deepin-editor/commit/74f01aafe039a506195d7ae35c08d3ab280176db))
+*   modify open and save logic. ([f3984dde](https://github.com/linuxdeepin/deepin-editor/commit/f3984dde7fcb1156f98eb8347ba2e6a5489b3211))
+*   use universal coding probe. ([0eec6314](https://github.com/linuxdeepin/deepin-editor/commit/0eec63143994894b2c049c4887fb283b489930c8))
+* **encoding:**  support russian in cyrllic. ([85f5b870](https://github.com/linuxdeepin/deepin-editor/commit/85f5b870fd5e560e95df916efd5b2e5d8910442a))
+* **tabbar:**  draft document modified status. ([6f2054e1](https://github.com/linuxdeepin/deepin-editor/commit/6f2054e1d018fa4f7d69009baa1ebdf4204c8abe))
+
+#### Features
+
+*   add highlight menu to bottombar. ([19a0fbe2](https://github.com/linuxdeepin/deepin-editor/commit/19a0fbe21c3dd967bb97f5b6e2b458eb1fd6adca))
+*   add cursor mode to the bottom bar. ([2135d2e0](https://github.com/linuxdeepin/deepin-editor/commit/2135d2e0f727de7c6025e5726f4746ee525bfc35))
+*   add drop down menu widget. ([13e8600e](https://github.com/linuxdeepin/deepin-editor/commit/13e8600ec23df0085263568508d6308f9a3f48d5))
+*   add bottom bar. ([c9931de1](https://github.com/linuxdeepin/deepin-editor/commit/c9931de15ba5e63eeadb17f9459b75462af224c5))
+*   add highlight brackets. ([bd138944](https://github.com/linuxdeepin/deepin-editor/commit/bd138944596a0f4ddd0882459f918ff6172248a2))
+*   add refresh function. ([44a8f882](https://github.com/linuxdeepin/deepin-editor/commit/44a8f882f877bb5fd1686f8c5ea165495f86e838))
+*   add find and replace options to the main menu. ([e418e977](https://github.com/linuxdeepin/deepin-editor/commit/e418e977be502eb83b2e80cd9a2e36e88d207a49))
+*   open new file will not create a new tab in a new blank document in draft. ([272c10e6](https://github.com/linuxdeepin/deepin-editor/commit/272c10e6499a92b33ba8e89d1db8bfdc7b22e893))
+*   add word wrap setting options. ([b6b871ad](https://github.com/linuxdeepin/deepin-editor/commit/b6b871adef2b7c0fcc3766fca7ae35e667934de0))
+* **bottombar:**  support encoding selections. ([341e7c37](https://github.com/linuxdeepin/deepin-editor/commit/341e7c378350a725d554e9883838c4e8db9f81b7))
+* **tabbar:**  add file read-only info. ([1ad8e437](https://github.com/linuxdeepin/deepin-editor/commit/1ad8e43727aedafecb2c1aa480ffdcee43836845))
+
+
+
+<a name=""></a>
+##  1.1.3 (2018-11-23)
+
+
+#### Bug Fixes
+
+*   update ts config. ([408b97e2](https://github.com/linuxdeepin/deepin-editor/commit/408b97e240e0131fd75178a6f5fa2b708ec46c02))
+
+#### Features
+
+*   support overwrite mode. ([bc57fd98](https://github.com/linuxdeepin/deepin-editor/commit/bc57fd98307cc8af61189006d2086b402c466ad5))
+*   support the recent file spec. ([122722b8](https://github.com/linuxdeepin/deepin-editor/commit/122722b8e86e54c5beec49cc91f26c2cae6f5bde))
+* **desktop:**  add generic name. ([d29ccc06](https://github.com/linuxdeepin/deepin-editor/commit/d29ccc06988393467a8dba82c0978493f40ad12d))
+* **tabbar:**  add document modification status. ([8fbdf34c](https://github.com/linuxdeepin/deepin-editor/commit/8fbdf34ce4c9988271129786d13dfe910b839166))
+
+
+
+<a name="1.1.2"></a>
+##  1.1.2 (2018-11-13)
+
+
+#### Bug Fixes
+
+*   drag and drop crash under loongson. ([0dc5d62c](https://github.com/linuxdeepin/deepin-editor/commit/0dc5d62c300e102cf62d397e7163d8223b6a21af))
+*   icon is incorrect ([f395cacc](https://github.com/linuxdeepin/deepin-editor/commit/f395caccf146e47ae38bf368e7cb9ae1429f8c35))
+
+#### Features
+
+*   add two mime types. ([14d1860e](https://github.com/linuxdeepin/deepin-editor/commit/14d1860e05db1052738f6bf1d41bf77f983be7ba))
+
+
+
+<a name="1.1.1"></a>
+## 1.1.1 (2018-10-26)
+
+
+#### Features
+
+*   update mime type. ([b0e5c0a5](https://github.com/linuxdeepin/deepin-editor/commit/b0e5c0a55d64363fc234fd7f25fb466419b60adf))
+* **theme_panel:**  modify the animation easing curve. ([f81a04e3](https://github.com/linuxdeepin/deepin-editor/commit/f81a04e355f1ca47d649786975c0cc27628d9f3d))
+
+#### Bug Fixes
+
+*   right menu under arch crashes. ([f08c9e26](https://github.com/linuxdeepin/deepin-editor/commit/f08c9e26a3fe538e3ad896974a55086919b2ed06))
+*   drag and drop the window is not activated. ([a199cec2](https://github.com/linuxdeepin/deepin-editor/commit/a199cec2f4207a11fb57cda9bbfcf94e783e6a47))
+*   a typo ([ea615971](https://github.com/linuxdeepin/deepin-editor/commit/ea615971c279e6d075f9671ddd18422ffea594a5))
+
+
+
 <a name="1.1"></a>
 ## 1.1 (2018-10-11)
 

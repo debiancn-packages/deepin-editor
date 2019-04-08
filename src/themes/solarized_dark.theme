@@ -148,7 +148,8 @@
     "editor-colors": {
         "background-color" : "#002B36",
         "code-folding" : "#224e65",
-        "bracket-matching" : "#8e44ad",
+        "bracket-match-bg" : "#586E75",
+        "bracket-match-fg" : "#AFBFBF",
         "current-line" : "#073642",
         "icon-border" : "#31363b",
         "indentation-line" : "#3a3f44",
@@ -164,8 +165,10 @@
         "modified-lines" : "#c04900",
         "replace-highlight" : "#808021",
         "saved-lines" : "#1c8042",
-        "search-highlight" : "#FFFFFF",
-        "search-highlight-bg-color" : "#586E75",
+        "find-match-background" : "#ffff00",
+        "find-match-foreground" : "#000000",
+        "find-highlight-background" : "#2CA7F8",
+        "find-highlight-foreground" : "#FFFFFF",
         "selection" : "#224659",
         "separator" : "#7a7c7d",
         "spell-checking" : "#c0392b",
@@ -182,7 +185,7 @@
         "tab-background-end-color" : "(0, 37, 46, 90%)",
         "tab-dnd-start" : "(7, 54, 66, 90%)",
         "tab-dnd-end" : "(10, 77, 94, 90%)",
-        "themebar-frame-selected" : "#2CA7F8",
+        "themebar-frame-selected" : "#93A1A1",
         "themebar-frame-normal" : "#FFFFFF"
     }
 }

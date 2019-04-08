@@ -46,6 +46,7 @@ public:
     static QPixmap dropShadow(const QPixmap &source, qreal radius, const QColor &color, const QPoint &offset);
     static QImage dropShadow(const QPixmap &px, qreal radius, const QColor &color);
     static QByteArray detectEncode(const QByteArray &data, const QString &fileName = QString());
+    static QByteArray getEncode(const QByteArray &data);
     static qreal easeInOut(qreal x);
     static qreal easeInQuad(qreal x);
     static qreal easeInQuint(qreal x);
@@ -53,5 +54,8 @@ public:
     static qreal easeOutQuint(qreal x);
     static QVariantMap getThemeMapFromPath(const QString &filepath);
     static bool isMimeTypeSupport(const QString &filepath);
+    static bool isDraftFile(const QString &filepath);
     static void toast(const QString &message, QWidget* parent = nullptr);
+    static const QStringList getEncodeList();
+    static QPixmap renderSVG(const QString &filePath, const QSize &size);
 };

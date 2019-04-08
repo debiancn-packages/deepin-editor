@@ -234,8 +234,8 @@ QMimeData* Tabbar::createMimeDataFromTab(int index, const QStyleOptionTab &optio
     EditWrapper *wrapper = window->wrapper(fileAt(index));
     QMimeData *mimeData = new QMimeData;
 
+    mimeData->setProperty("wrapper", QVariant::fromValue(static_cast<void *>(wrapper)));
     mimeData->setData("dedit/tabbar", tabName.toUtf8());
-    mimeData->setUserData(0, (QObjectUserData *)wrapper);
     mimeData->removeFormat("text/plain");
 
     return mimeData;
@@ -245,8 +245,13 @@ void Tabbar::insertFromMimeDataOnDragEnter(int index, const QMimeData *source)
 {
     const QString tabName = QString::fromUtf8(source->data("dedit/tabbar"));
 
-    EditWrapper *wrapper = (EditWrapper *)source->userData(0);
+    QVariant pVar = source->property("wrapper");
+    EditWrapper *wrapper = static_cast<EditWrapper *>(pVar.value<void *>());
     Window *window = static_cast<Window *>(this->window());
+
+    if (!wrapper) {
+        return;
+    }
 
     window->addTabWithWrapper(wrapper, wrapper->textEditor()->filepath, tabName, index);
     window->focusActiveEditor();
@@ -256,8 +261,13 @@ void Tabbar::insertFromMimeData(int index, const QMimeData *source)
 {
     const QString tabName = QString::fromUtf8(source->data("dedit/tabbar"));
 
-    EditWrapper *wrapper = (EditWrapper *)source->userData(0);
+    QVariant pVar = source->property("wrapper");
+    EditWrapper *wrapper = static_cast<EditWrapper *>(pVar.value<void *>());
     Window *window = static_cast<Window *>(this->window());
+
+    if (!wrapper) {
+        return;
+    }
 
     window->addTabWithWrapper(wrapper, wrapper->textEditor()->filepath, tabName, index);
     window->focusActiveEditor();
@@ -377,9 +387,10 @@ void Tabbar::handleTabDroped(int index, Qt::DropAction, QObject *target)
     Tabbar *tabbar = qobject_cast<Tabbar *>(target);
 
     if (tabbar == nullptr) {
-        QWidget *window = this->window();
+        Window *window = static_cast<Window *>(this->window());
+        window->move(QCursor::pos() - window->topLevelWidget()->pos());
         window->show();
-        //window->move(QCursor::pos() - window->topLevelWidget()->pos());
+        window->activateWindow();
     } else {
         closeTab(index);
     }

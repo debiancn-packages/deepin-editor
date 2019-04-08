@@ -23,11 +23,14 @@
 #include "dtextedit.h"
 #include "utils.h"
 #include "window.h"
+#include "editwrapper.h"
+#include "widgets/bottombar.h"
 
 #include <KF5/KSyntaxHighlighting/definition.h>
 #include <KF5/KSyntaxHighlighting/syntaxhighlighter.h>
 #include <KF5/KSyntaxHighlighting/theme.h>
 
+#include <QAbstractTextDocumentLayout>
 #include <QTextDocumentFragment>
 #include <DDesktopServices>
 #include <QApplication>
@@ -38,43 +41,59 @@
 #include <QFileInfo>
 #include <QDebug>
 #include <QPainter>
+#include <QScroller>
 #include <QScrollBar>
 #include <QStyleFactory>
 #include <QTextBlock>
 #include <QMimeData>
 #include <QTimer>
 
-class LineNumberArea : public QWidget
+#include <private/qguiapplication_p.h>
+#include <qpa/qplatformtheme.h>
+
+static inline bool isModifier(QKeyEvent *e)
 {
-public:
-    LineNumberArea(DTextEdit *editor)
-        : QWidget(editor),
-          editor(editor) {
+    if (!e) {
+        return false;
     }
 
-    void paintEvent(QPaintEvent *event) {
-        editor->lineNumberAreaPaintEvent(event);
+    switch (e->key()) {
+    case Qt::Key_Shift:
+    case Qt::Key_Control:
+    case Qt::Key_Meta:
+    case Qt::Key_Alt:
+        return true;
+    default:
+        return false;
     }
+}
 
-    DTextEdit *editor;
-};
-
-DTextEdit::DTextEdit(QPlainTextEdit *parent)
-    : QPlainTextEdit(parent),
+DTextEdit::DTextEdit(QWidget *parent)
+    : QTextEdit(parent),
+      m_wrapper(nullptr),
       m_highlighter(new KSyntaxHighlighting::SyntaxHighlighter(document()))
 {
     lineNumberArea = new LineNumberArea(this);
 
+#if QT_VERSION < QT_VERSION_CHECK(5,9,0)
+    m_touchTapDistance = 15;
+#else
+    m_touchTapDistance = QGuiApplicationPrivate::platformTheme()->themeHint(QPlatformTheme::TouchDoubleTapDistance).toInt();
+#endif
+
     viewport()->installEventFilter(this);
+    viewport()->setCursor(Qt::IBeamCursor);
 
     // Don't draw frame around editor widget.
     setFrameShape(QFrame::NoFrame);
     setFocusPolicy(Qt::StrongFocus);
+    setMouseTracking(true);
+    setAcceptRichText(false);
 
     // Init widgets.
-    connect(this, &QPlainTextEdit::updateRequest, this, &DTextEdit::handleUpdateRequest);
-    connect(this, &QPlainTextEdit::textChanged, this, &DTextEdit::updateLineNumber, Qt::QueuedConnection);
-    connect(this, &QPlainTextEdit::cursorPositionChanged, this, &DTextEdit::highlightCurrentLine, Qt::QueuedConnection);
+    connect(this->verticalScrollBar(), &QScrollBar::valueChanged, this, &DTextEdit::updateLineNumber);
+    connect(this, &QTextEdit::textChanged, this, &DTextEdit::updateLineNumber);
+    connect(this, &QTextEdit::cursorPositionChanged, this, &DTextEdit::cursorPositionChanged);
     connect(document(), &QTextDocument::modificationChanged, this, &DTextEdit::setModified);
 
     // Init menu.
@@ -145,14 +164,16 @@ DTextEdit::DTextEdit(QPlainTextEdit *parent)
     m_scrollAnimation->setEasingCurve(QEasingCurve::InOutExpo);
     m_scrollAnimation->setDuration(300);
 
+    m_cursorMode = Insert;
+
     connect(m_scrollAnimation, &QPropertyAnimation::finished, this, &DTextEdit::handleScrollFinish, Qt::QueuedConnection);
 
     // Monitor cursor mark status to update in line number area.
     connect(this, &DTextEdit::cursorMarkChanged, this, &DTextEdit::handleCursorMarkChanged);
 
     // configure content area
-    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
     connect(verticalScrollBar(), &QScrollBar::rangeChanged, this, &DTextEdit::adjustScrollbarMargins, Qt::QueuedConnection);
 
@@ -165,6 +186,71 @@ DTextEdit::DTextEdit(QPlainTextEdit *parent)
             showCursorBlink();
         }
     });
+
+    // syntax selection
+
+    m_hlGroupMenu = new QMenu;
+    QAction *noHlAction = m_hlGroupMenu->addAction(tr("None"));
+
+    m_hlActionGroup = new QActionGroup(m_hlGroupMenu);
+    m_hlActionGroup->setExclusive(true);
+
+    noHlAction->setCheckable(true);
+    m_hlActionGroup->addAction(noHlAction);
+    noHlAction->setChecked(!m_highlighter->definition().isValid());
+
+    QMenu *hlSubMenu = nullptr;
+    QString currentGroup;
+
+    for (const auto &def : m_repository.definitions()) {
+        if (def.isHidden()) {
+            continue;
+        }
+
+        if (currentGroup != def.section()) {
+            currentGroup = def.section();
+            hlSubMenu = m_hlGroupMenu->addMenu(def.translatedSection());
+        }
+
+        if (!hlSubMenu) {
+            continue;
+        }
+
+        auto action = hlSubMenu->addAction(def.translatedName());
+        action->setCheckable(true);
+        action->setData(def.name());
+        m_hlActionGroup->addAction(action);
+
+        if (def.name() == m_highlighter->definition().name()) {
+            action->setChecked(true);
+        }
+    }
+
+    connect(m_hlActionGroup, &QActionGroup::triggered, this, [this] (QAction *action) {
+        const auto defName = action->data().toString();
+        const auto def = m_repository.definitionForName(defName);
+        m_highlighter->setDefinition(def);
+        emit hightlightChanged(action->text());
+    });
+}
+
+void DTextEdit::setWrapper(EditWrapper *w)
+{
+    m_wrapper = w;
+}
+
+int DTextEdit::lineNumberAreaWidth()
+{
+    int digits = 1;
+    int max = qMax(1, this->document()->blockCount());
+    while (max >= 10) {
+        max /= 10;
+        ++digits;
+    }
+
+    int space = 13 +  fontMetrics().width(QLatin1Char('9')) * (digits);
+
+    return space;
 }
 
 int DTextEdit::getCurrentLine()
@@ -307,6 +393,16 @@ void DTextEdit::backwardPair()
             setTextCursor(cursor);
         }
     }
+}
+
+int DTextEdit::blockCount() const
+{
+    return document()->blockCount();
+}
+
+QTextBlock DTextEdit::firstVisibleBlock()
+{
+    return document()->findBlockByLineNumber(getFirstVisibleBlockId());
 }
 
 void DTextEdit::moveToStart()
@@ -1006,6 +1102,8 @@ void DTextEdit::unindentText()
 void DTextEdit::setTabSpaceNumber(int number)
 {
     m_tabSpaceNumber = number;
+    updateFont();
+    updateLineNumber();
 }
 
 void DTextEdit::upcaseWord()
@@ -1140,11 +1238,17 @@ void DTextEdit::scrollToLine(int scrollOffset, int row, int column)
     m_scrollAnimation->start();
 }
 
+void DTextEdit::setLineWrapMode(bool enable)
+{
+    QTextEdit::setLineWrapMode(enable ? QTextEdit::WidgetWidth : QTextEdit::NoWrap);
+}
+
 void DTextEdit::setFontFamily(QString name)
 {
     // Update font.
     m_fontName = name;
     updateFont();
+    updateLineNumber();
 }
 
 void DTextEdit::setFontSize(int size)
@@ -1164,6 +1268,7 @@ void DTextEdit::updateFont()
     font.setPointSize(m_fontSize);
     font.setFamily(m_fontName);
     setFont(font);
+    setTabStopWidth(m_tabSpaceNumber * QFontMetrics(font).width(' '));
 }
 
 void DTextEdit::replaceAll(const QString &replaceText, const QString &withText)
@@ -1198,14 +1303,14 @@ void DTextEdit::replaceAll(const QString &replaceText, const QString &withText)
 void DTextEdit::replaceNext(const QString &replaceText, const QString &withText)
 {
     if (replaceText.isEmpty() ||
-        !m_cursorKeywordSelection.cursor.hasSelection()) {
+        !m_findHighlightSelection.cursor.hasSelection()) {
         // 无限替换的根源
         highlightKeyword(replaceText, getPosition());
         return;
     }
 
     QTextCursor cursor = textCursor();
-    cursor.setPosition(m_cursorKeywordSelection.cursor.position() - replaceText.size());
+    cursor.setPosition(m_findHighlightSelection.cursor.position() - replaceText.size());
     cursor.movePosition(QTextCursor::NoMove, QTextCursor::MoveAnchor);
     cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, replaceText.size());
     cursor.insertText(withText);
@@ -1244,7 +1349,7 @@ void DTextEdit::replaceRest(const QString &replaceText, const QString &withText)
     setTextCursor(startCursor);
 }
 
-bool DTextEdit::findKeywordForward(QString keyword)
+bool DTextEdit::findKeywordForward(const QString &keyword)
 {
     if (textCursor().hasSelection()) {
         // Get selection bound.
@@ -1285,10 +1390,10 @@ bool DTextEdit::findKeywordForward(QString keyword)
 
 void DTextEdit::removeKeywords()
 {
-    m_cursorKeywordSelection.cursor = textCursor();
-    m_cursorKeywordSelection.cursor.clearSelection();
+    m_findHighlightSelection.cursor = textCursor();
+    m_findHighlightSelection.cursor.clearSelection();
 
-    m_keywordSelections.clear();
+    m_findMatchSelections.clear();
 
     updateHighlightLineSelection();
 
@@ -1313,16 +1418,16 @@ void DTextEdit::updateCursorKeywordSelection(int position, bool findNext)
         if (findNext) {
             // Clear keyword if keyword not match anything.
             if (!setCursorKeywordSeletoin(0, findNext)) {
-                m_cursorKeywordSelection.cursor = textCursor();
+                m_findHighlightSelection.cursor = textCursor();
 
-                m_keywordSelections.clear();
+                m_findMatchSelections.clear();
                 renderAllSelections();
             }
         } else {
             QTextCursor cursor = textCursor();
             cursor.movePosition(QTextCursor::End, QTextCursor::MoveAnchor);
 
-            m_cursorKeywordSelection.cursor.clearSelection();
+            m_findHighlightSelection.cursor.clearSelection();
             setCursorKeywordSeletoin(cursor.position(), findNext);
         }
     }
@@ -1343,7 +1448,7 @@ void DTextEdit::updateHighlightLineSelection()
 void DTextEdit::updateKeywordSelections(QString keyword)
 {
     // Clear keyword selections first.
-    m_keywordSelections.clear();
+    m_findMatchSelections.clear();
 
     // Update selections with keyword.
     if (!keyword.isEmpty()) {
@@ -1355,17 +1460,14 @@ void DTextEdit::updateKeywordSelections(QString keyword)
 
         while (!cursor.isNull()) {
             QTextEdit::ExtraSelection extra;
-            QBrush bgBrush(m_selectionBgColor);
-            QBrush fgBrush(m_selectionColor);
-            extra.format.setProperty(QTextFormat::BackgroundBrush, bgBrush);
-            extra.format.setProperty(QTextFormat::ForegroundBrush, fgBrush);
+            extra.format = m_findMatchFormat;
             extra.cursor = cursor;
 
             cursor = document()->find(keyword, cursor, flags);
-            m_keywordSelections.append(extra);
+            m_findMatchSelections.append(extra);
         }
 
-        setExtraSelections(m_keywordSelections);
+        setExtraSelections(m_findMatchSelections);
     }
 }
 
@@ -1373,204 +1475,28 @@ void DTextEdit::renderAllSelections()
 {
     QList<QTextEdit::ExtraSelection> selections;
 
+//    for (auto findMatch : m_findMatchSelections) {
+//        findMatch.format = m_findMatchFormat;
+//        selections.append(findMatch);
+//    }
+
     selections.append(m_currentLineSelection);
-    selections.append(m_keywordSelections);
-    selections.append(m_cursorKeywordSelection);
+    selections.append(m_findMatchSelections);
+    selections.append(m_findHighlightSelection);
     selections.append(m_wordUnderCursorSelection);
+    selections.append(m_beginBracketSelection);
+    selections.append(m_endBracketSelection);
 
     setExtraSelections(selections);
 }
 
-void DTextEdit::keyPressEvent(QKeyEvent *keyEvent)
+QMenu *DTextEdit::getHighlightMenu()
 {
-    const QString &key = Utils::getKeyshortcut(keyEvent);
-
-    if (m_readOnlyMode) {
-        if (key == "J") {
-            nextLine();
-        } else if (key == "K") {
-            prevLine();
-        } else if (key == ",") {
-            moveToEnd();
-        } else if (key == ".") {
-            moveToStart();
-        } else if (key == "H") {
-            backwardChar();
-        } else if (key == "L") {
-            forwardChar();
-        } else if (key == "Space") {
-            scrollUp();
-        } else if (key == "V") {
-            scrollDown();
-        } else if (key == "F") {
-            forwardWord();
-        } else if (key == "B") {
-            backwardWord();
-        } else if (key == "A") {
-            moveToStartOfLine();
-        } else if (key == "E") {
-            moveToEndOfLine();
-        } else if (key == "M") {
-            moveToLineIndentation();
-        } else if (key == "Q") {
-            toggleReadOnlyMode();
-        } else if (key == "Shfit+J") {
-            scrollLineUp();
-        } else if (key == "Shift+K") {
-            scrollLineDown();
-        } else if (key == "P") {
-            forwardPair();
-        } else if (key == "N") {
-            backwardPair();
-        } else if (key == "Shift+:") {
-            copyLines();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "togglereadonlymode")) {
-            toggleReadOnlyMode();
-        } else if (key == "Shift+/" && keyEvent->modifiers() == Qt::ControlModifier) {
-            keyEvent->ignore();
-        } else {
-            // If press another key
-            // the main window does not receive
-            keyEvent->ignore();
-        }
-    } else {
-        if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "indentline")) {
-            indentText();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "backindentline")) {
-            unindentText();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "forwardchar")) {
-            forwardChar();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "backwardchar")) {
-            backwardChar();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "forwardword")) {
-            forwardWord();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "backwardword")) {
-            backwardWord();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "nextline")) {
-            nextLine();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "prevline")) {
-            prevLine();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "newline") || key == "Return") {
-            newline();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "opennewlineabove")) {
-            openNewlineAbove();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "opennewlinebelow")) {
-            openNewlineBelow();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "duplicateline")) {
-            duplicateLine();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "killline")) {
-            killLine();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "killcurrentline")) {
-            killCurrentLine();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "swaplineup")) {
-            moveLineDownUp(true);
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "swaplinedown")) {
-            moveLineDownUp(false);
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "scrolllineup")) {
-            scrollLineUp();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "scrolllinedown")) {
-            scrollLineDown();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "scrollup")) {
-            scrollUp();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "scrolldown")) {
-            scrollDown();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetoendofline")) {
-            moveToEndOfLine();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetostartofline")) {
-            moveToStartOfLine();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetostart")) {
-            moveToStart();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetoend")) {
-            moveToEnd();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetolineindentation")) {
-            moveToLineIndentation();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "upcaseword")) {
-            upcaseWord();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "downcaseword")) {
-            downcaseWord();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "capitalizeword")) {
-            capitalizeWord();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "killbackwardword")) {
-            killBackwardWord();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "killforwardword")) {
-            killForwardWord();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "forwardpair")) {
-            forwardPair();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "backwardpair")) {
-            backwardPair();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "transposechar")) {
-            transposeChar();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "selectall")) {
-            selectAll();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "copy")) {
-            copySelectedText();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "cut")) {
-            cutSelectedText();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "paste")) {
-            pasteText();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "setmark")) {
-            setMark();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "exchangemark")) {
-            exchangeMark();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "copylines")) {
-            copyLines();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "cutlines")) {
-            cutlines();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "joinlines")) {
-            joinLines();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "togglereadonlymode")) {
-            toggleReadOnlyMode();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "togglecomment")) {
-            toggleComment();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "undo")) {
-            QPlainTextEdit::undo();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "redo")) {
-            QPlainTextEdit::redo();
-        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "window", "escape")) {
-            escape();
-        } else {
-            // Post event to window widget if key match window key list.
-            for (auto option : m_settings->settings->group("shortcuts.window")->options()) {
-                if (key == m_settings->settings->option(option->key())->value().toString()) {
-                    keyEvent->ignore();
-                    return;
-                }
-            }
-
-            // Post event to window widget if match Alt+0 ~ Alt+9
-            QRegularExpression re("^Alt\\+\\d");
-            QRegularExpressionMatch match = re.match(key);
-            if (match.hasMatch()) {
-                keyEvent->ignore();
-                return;
-            }
-
-            // Text editor handle key self.
-            QPlainTextEdit::keyPressEvent(keyEvent);
-        }
-    }
-}
-
-void DTextEdit::wheelEvent(QWheelEvent *e)
-{
-    if (e->modifiers() & Qt::ControlModifier) {
-        const int deltaY = e->angleDelta().y();
-
-        if (deltaY < 0) {
-            qobject_cast<Window *>(this->window())->decrementFontSize();
-        } else {
-            qobject_cast<Window *>(this->window())->incrementFontSize();
-        }
-
-        return;
-    }
-
-    QPlainTextEdit::wheelEvent(e);
+    return m_hlGroupMenu;
 }
 
 void DTextEdit::lineNumberAreaPaintEvent(QPaintEvent *event)
 {
-    // Init.
     QPainter painter(lineNumberArea);
     painter.fillRect(event->rect(), m_backgroundColor);
 
@@ -1584,184 +1510,49 @@ void DTextEdit::lineNumberAreaPaintEvent(QPaintEvent *event)
     painter.fillRect(QRect(event->rect().x() + event->rect().width() - 1,
                            event->rect().y(), 1, event->rect().height()), splitLineColor);
 
-    // Update line number.
-    QTextBlock block = firstVisibleBlock();
-    int top = (int) blockBoundingGeometry(block).translated(contentOffset()).top();
-    int bottom = top + (int) blockBoundingRect(block).height();
-    int linenumber = block.blockNumber();
+    int blockNumber = getFirstVisibleBlockId();
+    QTextBlock block = document()->findBlockByNumber(blockNumber);
+    QTextBlock prev_block = (blockNumber > 0) ? document()->findBlockByNumber(blockNumber-1) : block;
+    int translate_y = (blockNumber > 0) ? -verticalScrollBar()->sliderPosition() : 0;
+
+    int top = this->viewport()->geometry().top();
+
+    // Adjust text position according to the previous "non entirely visible" block
+    // if applicable. Also takes in consideration the document's margin offset.
+    int additional_margin;
+    if (blockNumber == 0)
+        // Simply adjust to document's margin
+        additional_margin = document()->documentMargin() -1 - this->verticalScrollBar()->sliderPosition();
+    else
+        // Getting the height of the visible part of the previous "non entirely visible" block
+        additional_margin = document()->documentLayout()->blockBoundingRect(prev_block)
+                .translated(0, translate_y).intersected(this->viewport()->geometry()).height();
+
+    // Shift the starting point
+    top += additional_margin;
+
+    int bottom = top + document()->documentLayout()->blockBoundingRect(block).height();
 
     Utils::setFontSize(painter, document()->defaultFont().pointSize() - 2);
+    // Draw the numbers (displaying the current line number in green)
     while (block.isValid() && top <= event->rect().bottom()) {
         if (block.isVisible() && bottom >= event->rect().top()) {
-            if (linenumber + 1 == m_markStartLine) {
+            if (blockNumber + 1 == m_markStartLine) {
                 painter.setPen(m_regionMarkerColor);
             } else {
                 painter.setPen(m_lineNumbersColor);
             }
-            painter.drawText(0,
-                             top + 2,
-                             lineNumberArea->width(),
-                             blockBoundingRect(block).height(),
-                             Qt::AlignTop | Qt::AlignHCenter,
-                             QString::number(linenumber + 1));
+
+            painter.drawText(0, top,
+                             lineNumberArea->width(), fontMetrics().height(),
+                             Qt::AlignTop | Qt::AlignHCenter, QString::number(blockNumber + 1));
         }
 
         block = block.next();
         top = bottom;
-        bottom = top + (int) blockBoundingRect(block).height();
-
-        ++linenumber;
+        bottom = top + document()->documentLayout()->blockBoundingRect(block).height();
+        ++blockNumber;
     }
-}
-
-void DTextEdit::contextMenuEvent(QContextMenuEvent *event)
-{
-    m_rightMenu->clear();
-
-    QString wordAtCursor = getWordAtMouse();
-
-    QTextCursor selectionCursor = textCursor();
-    selectionCursor.movePosition(QTextCursor::StartOfBlock);
-    selectionCursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
-    QString text = selectionCursor.selectedText();
-
-    // init base.
-    bool isBlankLine = text.trimmed().isEmpty();
-
-    if (m_canUndo) {
-        m_rightMenu->addAction(m_undoAction);
-    }
-    if (m_canRedo) {
-        m_rightMenu->addAction(m_redoAction);
-    }
-    m_rightMenu->addSeparator();
-    if (textCursor().hasSelection()) {
-        m_rightMenu->addAction(m_cutAction);
-        m_rightMenu->addAction(m_copyAction);
-    } else {
-        // Just show copy/cut menu item when cursor rectangle contain moue pointer coordinate.
-        m_haveWordUnderCursor = highlightWordUnderMouse(event->pos());
-        if (m_haveWordUnderCursor) {
-            if (!wordAtCursor.isEmpty()) {
-                m_rightMenu->addAction(m_cutAction);
-                m_rightMenu->addAction(m_copyAction);
-            }
-        }
-    }
-    if (canPaste()) {
-        m_rightMenu->addAction(m_pasteAction);
-    }
-
-    if (!wordAtCursor.isEmpty()) {
-        m_rightMenu->addAction(m_deleteAction);
-    }
-    if (!toPlainText().isEmpty()) {
-        m_rightMenu->addAction(m_selectAllAction);
-    }
-    m_rightMenu->addSeparator();
-    if (!toPlainText().isEmpty()) {
-        m_rightMenu->addAction(m_findAction);
-        m_rightMenu->addAction(m_replaceAction);
-        m_rightMenu->addAction(m_jumpLineAction);
-        m_rightMenu->addSeparator();
-    }
-    if (!wordAtCursor.isEmpty()) {
-        m_rightMenu->addMenu(m_convertCaseMenu);
-    }
-
-    // syntax selection
-    QActionGroup *hlActionGroup = new QActionGroup(m_rightMenu);
-    hlActionGroup->setExclusive(true);
-
-    QMenu *hlGroupMenu = m_rightMenu->addMenu(tr("Highlight"));
-    QAction *noHlAction = hlGroupMenu->addAction(tr("None"));
-
-    noHlAction->setCheckable(true);
-    hlActionGroup->addAction(noHlAction);
-    noHlAction->setChecked(!m_highlighter->definition().isValid());
-
-    QMenu *hlSubMenu = nullptr;
-    QString currentGroup;
-
-    for (const auto &def : m_repository.definitions()) {
-        if (def.isHidden()) {
-            continue;
-        }
-
-        if (currentGroup != def.section()) {
-            currentGroup = def.section();
-            hlSubMenu = hlGroupMenu->addMenu(def.translatedSection());
-        }
-
-        Q_ASSERT(hlSubMenu);
-        auto action = hlSubMenu->addAction(def.translatedName());
-        action->setCheckable(true);
-        action->setData(def.name());
-        hlActionGroup->addAction(action);
-
-        if (def.name() == m_highlighter->definition().name()) {
-            action->setChecked(true);
-        }
-    }
-
-    connect(hlActionGroup, &QActionGroup::triggered, this, [this] (QAction *action) {
-        const auto defName = action->data().toString();
-        const auto def = m_repository.definitionForName(defName);
-        m_highlighter->setDefinition(def);
-    });
-
-    // intelligent judge whether to support comments.
-    const auto def = m_repository.definitionForFileName(QFileInfo(filepath).fileName());
-    if (!toPlainText().isEmpty() &&
-        (textCursor().hasSelection() || !isBlankLine) &&
-        !def.filePath().isEmpty()) {
-        m_rightMenu->addAction(m_toggleCommentAction);
-    }
-
-    m_rightMenu->addSeparator();
-    if (m_readOnlyMode) {
-        m_rightMenu->addAction(m_disableReadOnlyModeAction);
-    } else {
-        m_rightMenu->addAction(m_enableReadOnlyModeAction);
-    }
-    m_rightMenu->addAction(m_openInFileManagerAction);
-    m_rightMenu->addSeparator();
-    if (static_cast<Window*>(this->window())->isFullScreen()) {
-        m_rightMenu->addAction(m_exitFullscreenAction);
-    } else {
-        m_rightMenu->addAction(m_fullscreenAction);
-    }
-
-    m_rightMenu->exec(event->globalPos());
-}
-
-void DTextEdit::highlightCurrentLine()
-{
-    updateHighlightLineSelection();
-    renderAllSelections();
-
-    // Adjust scrollbar margins if reach last line.
-    // FIXME(rekols): Temporarily do not need this function.
-    // if (getCurrentLine() == blockCount()) {
-    //     // Adjust y coordinate up one line height.
-    //     m_scrollbarMargin = fontMetrics().height();
-
-    //     adjustScrollbarMargins();
-
-    //     // NOTE: do nextLine make scrollbar adjust y coordinate.
-    //     nextLine();
-    // } else {
-    //     m_scrollbarMargin = 0;
-
-    //     adjustScrollbarMargins();
-    // }
-
-    adjustScrollbarMargins();
-
-    // Keep current line at visible area.
-    // if (cursorRect().top() + fontMetrics().height() >= rect().height()) {
-    //     scrollLineUp();
-    // }
 }
 
 void DTextEdit::updateLineNumber()
@@ -1771,6 +1562,7 @@ void DTextEdit::updateLineNumber()
     int blockSize = QString::number(blockCount()).size();
 
     lineNumberArea->setFixedWidth(blockSize * fontMetrics().width('9') + m_lineNumberPaddingX * 4);
+    lineNumberArea->update();
 }
 
 void DTextEdit::handleScrollFinish()
@@ -1786,33 +1578,19 @@ void DTextEdit::handleScrollFinish()
     setTextCursor(cursor);
 }
 
-void DTextEdit::handleUpdateRequest(const QRect &rect, int dy)
-{
-    if (dy) {
-        lineNumberArea->scroll(0, dy);
-    } else {
-        lineNumberArea->update(0, rect.y(), lineNumberArea->width(), rect.height());
-    }
-}
-
 bool DTextEdit::setCursorKeywordSeletoin(int position, bool findNext)
 {
     int offsetLines = 3;
 
     if (findNext) {
-        for (int i = 0; i < m_keywordSelections.size(); i++) {
-            if (m_keywordSelections[i].cursor.position() > position) {
-                m_cursorKeywordSelection.cursor = m_keywordSelections[i].cursor;
+        for (int i = 0; i < m_findMatchSelections.size(); i++) {
+            if (m_findMatchSelections[i].cursor.position() > position) {
+                m_findHighlightSelection.cursor = m_findMatchSelections[i].cursor;
 
-                QBrush bgBrush(m_searchHighlightBgColor);
-                QBrush fgBrush(m_searchHighlightColor);
-                m_cursorKeywordSelection.format.setProperty(QTextFormat::ForegroundBrush, fgBrush);
-                m_cursorKeywordSelection.format.setProperty(QTextFormat::BackgroundBrush, bgBrush);
-
-                jumpToLine(m_keywordSelections[i].cursor.blockNumber() + offsetLines, false);
+                jumpToLine(m_findMatchSelections[i].cursor.blockNumber() + offsetLines, false);
 
                 QTextCursor cursor = textCursor();
-                cursor.setPosition(m_keywordSelections[i].cursor.position());
+                cursor.setPosition(m_findMatchSelections[i].cursor.position());
 
                 // Update cursor.
                 setTextCursor(cursor);
@@ -1821,19 +1599,14 @@ bool DTextEdit::setCursorKeywordSeletoin(int position, bool findNext)
             }
         }
     } else {
-        for (int i = m_keywordSelections.size() - 1; i >= 0; i--) {
-            if (m_keywordSelections[i].cursor.position() < position) {
-                m_cursorKeywordSelection.cursor = m_keywordSelections[i].cursor;
+        for (int i = m_findMatchSelections.size() - 1; i >= 0; i--) {
+            if (m_findMatchSelections[i].cursor.position() < position) {
+                m_findHighlightSelection.cursor = m_findMatchSelections[i].cursor;
 
-                QBrush bgBrush(m_searchHighlightBgColor);
-                QBrush fgBrush(m_searchHighlightColor);
-                m_cursorKeywordSelection.format.setProperty(QTextFormat::ForegroundBrush, fgBrush);
-                m_cursorKeywordSelection.format.setProperty(QTextFormat::BackgroundBrush, bgBrush);
-
-                jumpToLine(m_keywordSelections[i].cursor.blockNumber() + offsetLines, false);
+                jumpToLine(m_findMatchSelections[i].cursor.blockNumber() + offsetLines, false);
 
                 QTextCursor cursor = textCursor();
-                cursor.setPosition(m_keywordSelections[i].cursor.position());
+                cursor.setPosition(m_findMatchSelections[i].cursor.position());
 
                 // Update cursor.
                 setTextCursor(cursor);
@@ -1844,6 +1617,135 @@ bool DTextEdit::setCursorKeywordSeletoin(int position, bool findNext)
     }
 
     return false;
+}
+
+void DTextEdit::cursorPositionChanged()
+{
+    m_beginBracketSelection = QTextEdit::ExtraSelection();
+    m_endBracketSelection = QTextEdit::ExtraSelection();
+
+    updateHighlightLineSelection();
+    updateHighlightBrackets('(', ')');
+    updateHighlightBrackets('{', '}');
+    updateHighlightBrackets('[', ']');
+    renderAllSelections();
+
+    if (m_wrapper) {
+        QTextCursor cursor = textCursor();
+        m_wrapper->bottomBar()->updatePosition(cursor.blockNumber() + 1,
+                                               cursor.columnNumber() + 1);
+    }
+}
+
+void DTextEdit::updateHighlightBrackets(const QChar &openChar, const QChar &closeChar)
+{
+    QTextDocument *doc = document();
+    QTextCursor cursor = textCursor();
+    int position = cursor.position();
+
+    QTextCursor bracketBeginCursor;
+    QTextCursor bracketEndCursor;
+    cursor.clearSelection();
+
+    if (!bracketBeginCursor.isNull() || !bracketEndCursor.isNull()) {
+        bracketBeginCursor.setCharFormat(QTextCharFormat());
+        bracketEndCursor.setCharFormat(QTextCharFormat());
+        bracketBeginCursor = bracketEndCursor = QTextCursor();
+    }
+
+    bool forward;
+    QChar begin, end;
+
+    if (doc->characterAt(position) == openChar ||
+        doc->characterAt(position) == closeChar ||
+        doc->characterAt(position - 1) == openChar ||
+        doc->characterAt(position - 1) == closeChar)
+    {
+        forward = doc->characterAt(position) == openChar ||
+                  doc->characterAt(position - 1) == openChar;
+
+        if (forward) {
+            if (doc->characterAt(position) == openChar) {
+                position++;
+            } else {
+                cursor.setPosition(position - 1);
+            }
+
+            begin = openChar;
+            end = closeChar;
+        } else {
+            if (doc->characterAt(position) == closeChar) {
+                cursor.setPosition(position + 1);
+                position -= 1;
+            } else {
+                position -= 2;
+            }
+
+            begin = closeChar;
+            end = openChar;
+        }
+
+        bracketBeginCursor = cursor;
+        bracketBeginCursor.movePosition(forward ? QTextCursor::NextCharacter : QTextCursor::PreviousCharacter,
+                                        QTextCursor::KeepAnchor);
+
+        int braceDepth = 1;
+        QChar c;
+
+        while (!(c = doc->characterAt(position)).isNull()) {
+            if (c == begin) {
+                braceDepth++;
+            } else if (c == end) {
+                braceDepth--;
+
+                if (!braceDepth) {
+                    bracketEndCursor = QTextCursor(doc);
+                    bracketEndCursor.setPosition(position);
+                    bracketEndCursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+                    break;
+                }
+            }
+
+            forward ? position++ : position--;
+        }
+
+        // cannot find the end bracket to not need to highlight.
+        if (!bracketEndCursor.isNull()) {
+            m_beginBracketSelection.cursor = bracketBeginCursor;
+            m_beginBracketSelection.format = m_bracketMatchFormat;
+
+            m_endBracketSelection.cursor = bracketEndCursor;
+            m_endBracketSelection.format = m_bracketMatchFormat;
+        }
+    }
+}
+
+int DTextEdit::getFirstVisibleBlockId() const
+{
+    // Detect the first block for which bounding rect - once translated
+    // in absolute coordinated - is contained by the editor's text area
+
+    // Costly way of doing but since "blockBoundingGeometry(...)" doesn't
+    // exists for "QTextEdit"...
+
+    QTextCursor curs = QTextCursor(this->document());
+    curs.movePosition(QTextCursor::Start);
+    for (int i=0; i < this->document()->blockCount(); ++i) {
+        QTextBlock block = curs.block();
+
+        QRect r1 = this->viewport()->geometry();
+        QRect r2 = this->document()->documentLayout()->blockBoundingRect(block).translated(
+                    this->viewport()->geometry().x(), this->viewport()->geometry().y() - (
+                        this->verticalScrollBar()->sliderPosition())).toRect();
+
+        if (r1.contains(r2, true)) {
+            return i;
+        }
+
+        curs.movePosition(QTextCursor::NextBlock);
+    }
+
+    return 0;
 }
 
 void DTextEdit::setThemeWithPath(const QString &path)
@@ -1864,12 +1766,28 @@ void DTextEdit::setTheme(const KSyntaxHighlighting::Theme &theme, const QString 
     m_currentLineNumberColor = QColor(jsonMap["editor-colors"].toMap()["current-line-number"].toString());
     m_lineNumbersColor = QColor(jsonMap["editor-colors"].toMap()["line-numbers"].toString());
     m_regionMarkerColor = QColor(textStylesMap["RegionMarker"].toMap()["selected-text-color"].toString());
-    m_searchHighlightColor = QColor(jsonMap["editor-colors"].toMap()["search-highlight-color"].toString());
-    m_searchHighlightBgColor = QColor(jsonMap["editor-colors"].toMap()["search-highlight-bg-color"].toString());
     m_selectionColor = QColor(textStylesMap["Normal"].toMap()["selected-text-color"].toString());
     m_selectionBgColor = QColor(textStylesMap["Normal"].toMap()["selected-bg-color"].toString());
 
-    const QString &styleSheet = QString("QPlainTextEdit {"
+    m_bracketMatchFormat = currentCharFormat();
+    m_bracketMatchFormat.setForeground(QColor(jsonMap["editor-colors"].toMap()["bracket-match-fg"].toString()));
+    m_bracketMatchFormat.setBackground(QColor(jsonMap["editor-colors"].toMap()["bracket-match-bg"].toString()));
+
+    const QString findMatchBgColor = jsonMap["editor-colors"].toMap()["find-match-background"].toString();
+    const QString findMatchFgColor = jsonMap["editor-colors"].toMap()["find-match-foreground"].toString();
+    m_findMatchFormat = currentCharFormat();
+    m_findMatchFormat.setBackground(QColor(findMatchBgColor));
+    m_findMatchFormat.setForeground(QColor(findMatchFgColor));
+
+    const QString findHighlightBgColor = jsonMap["editor-colors"].toMap()["find-highlight-background"].toString();
+    const QString findHighlightFgColor = jsonMap["editor-colors"].toMap()["find-highlight-foreground"].toString();
+    m_findHighlightSelection.format.setProperty(QTextFormat::BackgroundBrush, QBrush(QColor(findHighlightBgColor)));
+    m_findHighlightSelection.format.setProperty(QTextFormat::ForegroundBrush, QBrush(QColor(findHighlightFgColor)));
+
+    m_beginBracketSelection.format = m_bracketMatchFormat;
+    m_endBracketSelection.format = m_bracketMatchFormat;
+
+    const QString &styleSheet = QString("QTextEdit {"
                                         "background-color: %1;"
                                         "color: %2;"
                                         "selection-color: %3;"
@@ -1882,6 +1800,14 @@ void DTextEdit::setTheme(const KSyntaxHighlighting::Theme &theme, const QString 
         m_highlighter->setTheme(m_repository.defaultTheme(KSyntaxHighlighting::Repository::DarkTheme));
     } else {
         m_highlighter->setTheme(m_repository.defaultTheme(KSyntaxHighlighting::Repository::LightTheme));
+    }
+
+    // TODO
+    if (m_wrapper) {
+        QPalette palette = m_wrapper->bottomBar()->palette();
+        palette.setColor(QPalette::Background, m_backgroundColor);
+        palette.setColor(QPalette::Text, textColor);
+        m_wrapper->bottomBar()->setPalette(palette);
     }
 
     // does not support highlight do not reload
@@ -1899,7 +1825,8 @@ void DTextEdit::loadHighlighter()
     const auto def = m_repository.definitionForFileName(QFileInfo(filepath).fileName());
 
     if (!def.filePath().isEmpty()) {
-        const QString &syntaxFile = QFileInfo(QString(":/syntax/%1").arg(QFileInfo(def.filePath()).fileName())).absoluteFilePath();
+        const QString &syntaxFile = QFileInfo(QString(":/syntax/%1")
+                                              .arg(QFileInfo(def.filePath()).fileName())).absoluteFilePath();
 
         QFile file(syntaxFile);
         if (!file.open(QFile::ReadOnly)) {
@@ -1938,6 +1865,15 @@ void DTextEdit::loadHighlighter()
         file.close();
 
         m_highlighted = true;
+
+        // init action.
+        for (QAction *action : m_hlActionGroup->actions()) {
+            if (action->text() == def.name()) {
+                action->setChecked(true);
+                emit hightlightChanged(action->text());
+            }
+        }
+
     } else {
         m_highlighted = false;
     }
@@ -2000,6 +1936,8 @@ void DTextEdit::setSettings(Settings *keySettings)
 void DTextEdit::setModified(bool modified)
 {
     document()->setModified(modified);
+
+    emit modificationChanged(filepath, modified);
 }
 
 void DTextEdit::copySelectedText()
@@ -2023,7 +1961,7 @@ void DTextEdit::cutSelectedText()
 
 void DTextEdit::pasteText()
 {
-    QPlainTextEdit::paste();
+    QTextEdit::paste();
 
     unsetMark();
 }
@@ -2226,7 +2164,7 @@ QString DTextEdit::getWordAtMouse()
         rect.setX(std::max(rect.x() - widthOffset / 2, 0));
         rect.setWidth(rect.width() + widthOffset);
 
-        // Just highlight word under pointer when cursor rectangle contain moue pointer coordinate.
+        // Just highlight word under pointer when cursor rectangle contain mouse pointer coordinate.
         if ((rect.x() <= pos.x()) &&
             (pos.x() <= rect.x() + rect.width()) &&
             (rect.y() <= pos.y()) &&
@@ -2243,13 +2181,19 @@ QString DTextEdit::getWordAtMouse()
 void DTextEdit::toggleReadOnlyMode()
 {
     if (m_readOnlyMode) {
-        m_readOnlyMode = false;
+        if (m_cursorMode == Overwrite) {
+            emit cursorModeChanged(Overwrite);
+        } else {
+            emit cursorModeChanged(Insert);
+        }
 
+        m_readOnlyMode = false;
         popupNotify(tr("Read-Only mode is off"));
     } else {
         m_readOnlyMode = true;
 
         popupNotify(tr("Read-Only mode is on"));
+        emit cursorModeChanged(Readonly);
     }
 }
 
@@ -2377,7 +2321,7 @@ void DTextEdit::adjustScrollbarMargins()
 
 void DTextEdit::dragEnterEvent(QDragEnterEvent *event)
 {
-    QPlainTextEdit::dragEnterEvent(event);
+    QTextEdit::dragEnterEvent(event);
     qobject_cast<Window *>(this->window())->requestDragEnterEvent(event);
 }
 
@@ -2392,7 +2336,7 @@ void DTextEdit::dragMoveEvent(QDragMoveEvent *event)
     if (data->hasUrls()) {
         event->acceptProposedAction();
     } else {
-        QPlainTextEdit::dragMoveEvent(event);
+        QTextEdit::dragMoveEvent(event);
     }
 }
 
@@ -2403,13 +2347,389 @@ void DTextEdit::dropEvent(QDropEvent *event)
     if (data->hasUrls() && data->urls().first().isLocalFile()) {
         qobject_cast<Window *>(this->window())->requestDropEvent(event);
     } else if (data->hasText() && !m_readOnlyMode) {
-        QPlainTextEdit::dropEvent(event);
+        QTextEdit::dropEvent(event);
     }
 }
 
 void DTextEdit::inputMethodEvent(QInputMethodEvent *e)
 {
     if (!m_readOnlyMode) {
-        QPlainTextEdit::inputMethodEvent(e);
+        QTextEdit::inputMethodEvent(e);
     }
+}
+
+void DTextEdit::mousePressEvent(QMouseEvent *e)
+{
+    if (e->source() == Qt::MouseEventSynthesizedByQt) {
+        m_lastTouchBeginPos = e->pos();
+
+        if (QScroller::hasScroller(this)) {
+            QScroller::scroller(this)->deleteLater();
+        }
+
+        if (m_updateEnableSelectionByMouseTimer) {
+            m_updateEnableSelectionByMouseTimer->stop();
+        } else {
+            m_updateEnableSelectionByMouseTimer = new QTimer(this);
+            m_updateEnableSelectionByMouseTimer->setSingleShot(true);
+
+            static QObject *theme_settings = reinterpret_cast<QObject*>(qvariant_cast<quintptr>(qApp->property("_d_theme_settings_object")));
+            QVariant touchFlickBeginMoveDelay;
+
+            if (theme_settings) {
+                touchFlickBeginMoveDelay = theme_settings->property("touchFlickBeginMoveDelay");
+            }
+
+            m_updateEnableSelectionByMouseTimer->setInterval(touchFlickBeginMoveDelay.isValid() ? touchFlickBeginMoveDelay.toInt() : 300);
+
+            connect(m_updateEnableSelectionByMouseTimer, &QTimer::timeout, m_updateEnableSelectionByMouseTimer, &QTimer::deleteLater);
+        }
+
+        m_updateEnableSelectionByMouseTimer->start();
+    }
+
+    QTextEdit::mousePressEvent(e);
+}
+
+void DTextEdit::mouseMoveEvent(QMouseEvent *e)
+{
+    if (e->source() == Qt::MouseEventSynthesizedByQt) {
+        if (QScroller::hasScroller(this))
+            return;
+
+        if (m_updateEnableSelectionByMouseTimer
+                && m_updateEnableSelectionByMouseTimer->isActive()) {
+            const QPoint difference_pos = e->pos() - m_lastTouchBeginPos;
+
+            if (std::abs(difference_pos.x()) > m_touchTapDistance
+                    || std::abs(difference_pos.y()) > m_touchTapDistance) {
+                QScroller::grabGesture(this);
+                QScroller *scroller = QScroller::scroller(this);
+
+                scroller->handleInput(QScroller::InputPress, e->localPos(), e->timestamp());
+                scroller->handleInput(QScroller::InputMove, e->localPos(), e->timestamp());
+            }
+
+            return;
+        }
+    }
+
+    // other apps will override their own cursor when opened
+    // so they need to be restored.
+    QApplication::restoreOverrideCursor();
+
+    if (viewport()->cursor().shape() != Qt::IBeamCursor) {
+        viewport()->setCursor(Qt::IBeamCursor);
+    }
+
+    QTextEdit::mouseMoveEvent(e);
+}
+
+void DTextEdit::keyPressEvent(QKeyEvent *e)
+{
+    // if (!isModifier(e)) {
+    //     viewport()->setCursor(Qt::BlankCursor);
+    // }
+
+    const QString &key = Utils::getKeyshortcut(e);
+
+    if (m_readOnlyMode) {
+        if (key == "J") {
+            nextLine();
+        } else if (key == "K") {
+            prevLine();
+        } else if (key == ",") {
+            moveToEnd();
+        } else if (key == ".") {
+            moveToStart();
+        } else if (key == "H") {
+            backwardChar();
+        } else if (key == "L") {
+            forwardChar();
+        } else if (key == "Space") {
+            scrollUp();
+        } else if (key == "V") {
+            scrollDown();
+        } else if (key == "F") {
+            forwardWord();
+        } else if (key == "B") {
+            backwardWord();
+        } else if (key == "A") {
+            moveToStartOfLine();
+        } else if (key == "E") {
+            moveToEndOfLine();
+        } else if (key == "M") {
+            moveToLineIndentation();
+        } else if (key == "Q") {
+            toggleReadOnlyMode();
+        } else if (key == "Shfit+J") {
+            scrollLineUp();
+        } else if (key == "Shift+K") {
+            scrollLineDown();
+        } else if (key == "P") {
+            forwardPair();
+        } else if (key == "N") {
+            backwardPair();
+        } else if (key == "Shift+:") {
+            copyLines();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "togglereadonlymode")) {
+            toggleReadOnlyMode();
+        } else if (key == "Shift+/" && e->modifiers() == Qt::ControlModifier) {
+            e->ignore();
+        } else {
+            // If press another key
+            // the main window does not receive
+            e->ignore();
+        }
+    } else {
+        if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "indentline")) {
+            indentText();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "backindentline")) {
+            unindentText();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "forwardchar")) {
+            forwardChar();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "backwardchar")) {
+            backwardChar();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "forwardword")) {
+            forwardWord();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "backwardword")) {
+            backwardWord();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "nextline")) {
+            nextLine();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "prevline")) {
+            prevLine();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "newline") || key == "Return") {
+            newline();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "opennewlineabove")) {
+            openNewlineAbove();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "opennewlinebelow")) {
+            openNewlineBelow();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "duplicateline")) {
+            duplicateLine();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "killline")) {
+            killLine();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "killcurrentline")) {
+            killCurrentLine();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "swaplineup")) {
+            moveLineDownUp(true);
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "swaplinedown")) {
+            moveLineDownUp(false);
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "scrolllineup")) {
+            scrollLineUp();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "scrolllinedown")) {
+            scrollLineDown();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "scrollup")) {
+            scrollUp();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "scrolldown")) {
+            scrollDown();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetoendofline")) {
+            moveToEndOfLine();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetostartofline")) {
+            moveToStartOfLine();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetostart")) {
+            moveToStart();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetoend")) {
+            moveToEnd();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "movetolineindentation")) {
+            moveToLineIndentation();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "upcaseword")) {
+            upcaseWord();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "downcaseword")) {
+            downcaseWord();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "capitalizeword")) {
+            capitalizeWord();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "killbackwardword")) {
+            killBackwardWord();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "killforwardword")) {
+            killForwardWord();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "forwardpair")) {
+            forwardPair();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "backwardpair")) {
+            backwardPair();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "transposechar")) {
+            transposeChar();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "selectall")) {
+            selectAll();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "copy")) {
+            copySelectedText();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "cut")) {
+            cutSelectedText();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "paste")) {
+            pasteText();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "setmark")) {
+            setMark();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "exchangemark")) {
+            exchangeMark();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "copylines")) {
+            copyLines();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "cutlines")) {
+            cutlines();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "joinlines")) {
+            joinLines();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "togglereadonlymode")) {
+            toggleReadOnlyMode();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "togglecomment")) {
+            toggleComment();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "undo")) {
+            QTextEdit::undo();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "editor", "redo")) {
+            QTextEdit::redo();
+        } else if (key == Utils::getKeyshortcutFromKeymap(m_settings, "window", "escape")) {
+            escape();
+        } else if (e->key() == Qt::Key_Insert) {
+            if (e->modifiers() == Qt::NoModifier) {
+                setOverwriteMode(!overwriteMode());
+                update();
+                e->accept();
+
+                m_cursorMode = overwriteMode() ? Overwrite : Insert;
+                emit cursorModeChanged(m_cursorMode);
+            }
+        } else {
+            // Post event to window widget if key match window key list.
+            for (auto option : m_settings->settings->group("shortcuts.window")->options()) {
+                if (key == m_settings->settings->option(option->key())->value().toString()) {
+                    e->ignore();
+                    return;
+                }
+            }
+
+            // Post event to window widget if match Alt+0 ~ Alt+9
+            QRegularExpression re("^Alt\\+\\d");
+            QRegularExpressionMatch match = re.match(key);
+            if (match.hasMatch()) {
+                e->ignore();
+                return;
+            }
+
+            // Text editor handle key self.
+            QTextEdit::keyPressEvent(e);
+        }
+    }
+}
+
+void DTextEdit::wheelEvent(QWheelEvent *e)
+{
+    if (e->modifiers() & Qt::ControlModifier) {
+        const int deltaY = e->angleDelta().y();
+
+        if (deltaY < 0) {
+            qobject_cast<Window *>(this->window())->decrementFontSize();
+        } else {
+            qobject_cast<Window *>(this->window())->incrementFontSize();
+        }
+
+        return;
+    }
+
+    QTextEdit::wheelEvent(e);
+}
+
+void DTextEdit::contextMenuEvent(QContextMenuEvent *event)
+{
+    m_rightMenu->clear();
+
+    QString wordAtCursor = getWordAtMouse();
+
+    QTextCursor selectionCursor = textCursor();
+    selectionCursor.movePosition(QTextCursor::StartOfBlock);
+    selectionCursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+    QString text = selectionCursor.selectedText();
+
+    // init base.
+    bool isBlankLine = text.trimmed().isEmpty();
+
+    if (m_canUndo) {
+        m_rightMenu->addAction(m_undoAction);
+    }
+    if (m_canRedo) {
+        m_rightMenu->addAction(m_redoAction);
+    }
+    m_rightMenu->addSeparator();
+    if (textCursor().hasSelection()) {
+        m_rightMenu->addAction(m_cutAction);
+        m_rightMenu->addAction(m_copyAction);
+    } else {
+        // Just show copy/cut menu item when cursor rectangle contain moue pointer coordinate.
+        m_haveWordUnderCursor = highlightWordUnderMouse(event->pos());
+        if (m_haveWordUnderCursor) {
+            if (!wordAtCursor.isEmpty()) {
+                m_rightMenu->addAction(m_cutAction);
+                m_rightMenu->addAction(m_copyAction);
+            }
+        }
+    }
+    if (canPaste()) {
+        m_rightMenu->addAction(m_pasteAction);
+    }
+
+    if (!wordAtCursor.isEmpty()) {
+        m_rightMenu->addAction(m_deleteAction);
+    }
+    if (!toPlainText().isEmpty()) {
+        m_rightMenu->addAction(m_selectAllAction);
+    }
+    m_rightMenu->addSeparator();
+    if (!toPlainText().isEmpty()) {
+        m_rightMenu->addAction(m_findAction);
+        m_rightMenu->addAction(m_replaceAction);
+        m_rightMenu->addAction(m_jumpLineAction);
+        m_rightMenu->addSeparator();
+    }
+    if (!wordAtCursor.isEmpty()) {
+        m_rightMenu->addMenu(m_convertCaseMenu);
+    }
+
+    // intelligent judge whether to support comments.
+    const auto def = m_repository.definitionForFileName(QFileInfo(filepath).fileName());
+    if (!toPlainText().isEmpty() &&
+        (textCursor().hasSelection() || !isBlankLine) &&
+        !def.filePath().isEmpty()) {
+        m_rightMenu->addAction(m_toggleCommentAction);
+    }
+
+    m_rightMenu->addSeparator();
+    if (m_readOnlyMode) {
+        m_rightMenu->addAction(m_disableReadOnlyModeAction);
+    } else {
+        m_rightMenu->addAction(m_enableReadOnlyModeAction);
+    }
+    m_rightMenu->addAction(m_openInFileManagerAction);
+    m_rightMenu->addSeparator();
+    if (static_cast<Window*>(this->window())->isFullScreen()) {
+        m_rightMenu->addAction(m_exitFullscreenAction);
+    } else {
+        m_rightMenu->addAction(m_fullscreenAction);
+    }
+
+    m_rightMenu->exec(event->globalPos());
+}
+
+void DTextEdit::highlightCurrentLine()
+{
+    updateHighlightLineSelection();
+    renderAllSelections();
+
+    // Adjust scrollbar margins if reach last line.
+    // FIXME(rekols): Temporarily do not need this function.
+    // if (getCurrentLine() == blockCount()) {
+    //     // Adjust y coordinate up one line height.
+    //     m_scrollbarMargin = fontMetrics().height();
+
+    //     adjustScrollbarMargins();
+
+    //     // NOTE: do nextLine make scrollbar adjust y coordinate.
+    //     nextLine();
+    // } else {
+    //     m_scrollbarMargin = 0;
+
+    //     adjustScrollbarMargins();
+    // }
+
+    adjustScrollbarMargins();
+
+    // Keep current line at visible area.
+    // if (cursorRect().top() + fontMetrics().height() >= rect().height()) {
+    //     scrollLineUp();
+    // }
 }

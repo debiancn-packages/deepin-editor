@@ -31,18 +31,14 @@
 #include "replacebar.h"
 #include "settings.h"
 #include "tabbar.h"
-#include "themewidgets/themepanel.h"
+#include "thememodule/themepanel.h"
 
 #include <QWidget>
 #include <QStackedWidget>
 #include <QResizeEvent>
 #include <QVBoxLayout>
 
-#include "dwindowmanager.h"
-#include "dimagebutton.h"
-
 DWIDGET_USE_NAMESPACE
-DWM_USE_NAMESPACE
 
 class Window : public DMainWindow
 {
@@ -59,7 +55,7 @@ public:
 
     void addTab(const QString &filepath, bool activeTab = false);
     void addTabWithWrapper(EditWrapper *wrapper, const QString &filepath,
-                          const QString &tabName, int index = -1);
+                           const QString &tabName, int index = -1);
     void closeTab();
     void restoreTab();
 
@@ -72,8 +68,7 @@ public:
 
     void openFile();
     bool saveFile();
-    void saveAsFile();
-    void saveFileAsAnotherPath(const QString &fromPath, const QString &toPath, const QString &encode, const QString &newline, bool deleteOldFile=false);
+    bool saveAsFile();
 
     void decrementFontSize();
     void incrementFontSize();
@@ -84,10 +79,10 @@ public:
     void popupReplaceBar();
     void popupJumpLineBar();
     void popupSettingsDialog();
+    void popupPrintDialog();
+    void popupThemePanel();
 
     void toggleFullscreen();
-
-    const QStringList getEncodeList();
 
     void remberPositionSave();
     void remberPositionRestore();
@@ -99,9 +94,6 @@ public:
     void changeTitlebarBackground(const QString &color);
     void changeTitlebarBackground(const QString &startColor, const QString &endColor);
 
-    void saveAs(const QString &filepath);
-    const QString getSaveFilePath(QString &encode, QString &newline);
-
     void displayShortcuts();
 
 signals:
@@ -110,14 +102,6 @@ signals:
     void requestDropEvent(QDropEvent *);
     void newWindow();
     void close();
-
-protected:
-    void resizeEvent(QResizeEvent* event) override;
-    void closeEvent(QCloseEvent *event) override;
-    void keyPressEvent(QKeyEvent *keyEvent) override;
-    void dragEnterEvent(QDragEnterEvent *e) override;
-    void dropEvent(QDropEvent* event) override;
-    bool eventFilter(QObject *, QEvent *event) override;
 
 public slots:
     void addBlankTab();
@@ -145,16 +129,25 @@ public slots:
     void addBottomWidget(QWidget *widget);
     void removeBottomWidget();
 
-    void popupPrintDialog();
-
     void loadTheme(const QString &path);
 
-    void removeActiveBlankTab(bool needSaveBefore = false);
-    void removeActiveReadonlyTab();
     void showNewEditor(EditWrapper *wrapper);
     void showNotify(const QString &message);
-    DDialog* createSaveFileDialog(QString title, QString content);
     int getBlankFileIndex();
+
+    DDialog *createDialog(const QString &title, const QString &content);
+
+private:
+    void handleFocusWindowChanged(QWindow *w);
+    void updateThemePanelGeomerty();
+    void checkTabbarForReload();
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+    void closeEvent(QCloseEvent *event) override;
+    void keyPressEvent(QKeyEvent *keyEvent) override;
+    void dragEnterEvent(QDragEnterEvent *e) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     DBusDaemon::dbus *m_rootSaveDBus;
@@ -169,7 +162,6 @@ private:
     ThemePanel *m_themePanel;
     FindBar *m_findBar;
     Settings *m_settings;
-    DWindowManager *m_windowManager;
 
     QMap<QString, EditWrapper *> m_wrappers;
 
@@ -183,13 +175,9 @@ private:
     int m_remberPositionScrollOffset;
 
     QString m_blankFileDir;
-    int m_fontSize;
+    int m_fontSize = 0;
 
     QString m_titlebarStyleSheet;
-
-    bool m_windowShowFlag = false;
-
-    QString m_readonlySeparator = " !_! ";
 
     QString m_themePath;
     QString m_tabbarActiveColor;
