@@ -1,3 +1,14 @@
+deepin-editor (1.2.7-1) unstable; urgency=medium
+
+  [ rekols ]
+  * fix: a typo
+  * fix: drag and drop the window is not activated.
+
+  [ Yanhao Mo ]
+  * New upstream version 1.2.7
+
+ -- Yanhao Mo <yanhaocs@gmail.com>  Mon, 08 Apr 2019 11:42:59 +0800
+
 deepin-editor (1.1-1) unstable; urgency=medium
 
   * Initial release (Closes: #897571)
