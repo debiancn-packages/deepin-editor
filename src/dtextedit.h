@@ -25,12 +25,13 @@
 
 #include <KF5/KSyntaxHighlighting/repository.h>
 #include "uncommentselection.h"
+#include "linenumberarea.h"
 
 #include "settings.h"
 #include <QAction>
 #include <QMenu>
 #include <QPaintEvent>
-#include <QPlainTextEdit>
+#include <QTextEdit>
 #include <QPropertyAnimation>
 
 namespace KSyntaxHighlighting {
@@ -39,15 +40,26 @@ namespace KSyntaxHighlighting {
 
 enum ConvertCase { UPPER, LOWER, CAPITALIZE };
 
-class DTextEdit : public QPlainTextEdit
+class EditWrapper;
+class DTextEdit : public QTextEdit
 {
     Q_OBJECT
 
 public:
-    DTextEdit(QPlainTextEdit *parent = 0);
+    enum CursorMode {
+        Insert,
+        Overwrite,
+        Readonly
+    };
+
+    DTextEdit(QWidget *parent = nullptr);
 
     QWidget *lineNumberArea;
     QString filepath;
+
+    void setWrapper(EditWrapper *);
+
+    int lineNumberAreaWidth();
 
     int getCurrentLine();
     int getCurrentColumn();
@@ -60,6 +72,9 @@ public:
     void backwardWord();
     void forwardPair();
     void backwardPair();
+
+    int blockCount() const;
+    QTextBlock firstVisibleBlock();
 
     void moveToStart();
     void moveToEnd();
@@ -101,6 +116,7 @@ public:
     void keepCurrentLineAtCenter();
     void scrollToLine(int scrollOffset, int row, int column);
 
+    void setLineWrapMode(bool enable);
     void setFontFamily(QString fontName);
     void setFontSize(int fontSize);
     void updateFont();
@@ -109,7 +125,7 @@ public:
     void replaceNext(const QString &replaceText, const QString &withText);
     void replaceRest(const QString &replaceText, const QString &withText);
 
-    bool findKeywordForward(QString keyword);
+    bool findKeywordForward(const QString &keyword);
 
     void removeKeywords();
     void highlightKeyword(QString keyword, int position);
@@ -118,11 +134,9 @@ public:
     void updateKeywordSelections(QString keyword);
     void renderAllSelections();
 
-    void keyPressEvent(QKeyEvent *e);
-    void wheelEvent(QWheelEvent *e);
-    bool eventFilter(QObject *, QEvent *event);
+    QMenu *getHighlightMenu();
+
     void lineNumberAreaPaintEvent(QPaintEvent *event);
-    void contextMenuEvent(QContextMenuEvent *event);
 
     void setThemeWithPath(const QString &path);
     void setTheme(const KSyntaxHighlighting::Theme &theme, const QString &path);
@@ -166,6 +180,9 @@ signals:
     void clickJumpLineAction();
     void clickFullscreenAction();
     void cursorMarkChanged(bool mark, QTextCursor cursor);
+    void modificationChanged(const QString &path, bool isModified);
+    void cursorModeChanged(CursorMode mode);
+    void hightlightChanged(const QString &name);
     void popupNotify(QString notify);
     void click();
     void pressEsc();
@@ -174,7 +191,6 @@ public slots:
     void highlightCurrentLine();
     void updateLineNumber();
     void handleScrollFinish();
-    void handleUpdateRequest(const QRect &rect, int dy);
 
     void clickCutAction();
     void clickCopyAction();
@@ -200,15 +216,28 @@ protected:
     void dropEvent(QDropEvent *event) override;
     void inputMethodEvent(QInputMethodEvent *e) override;
 
+    void mousePressEvent(QMouseEvent *e) override;
+    void mouseMoveEvent(QMouseEvent *e) override;
+    void keyPressEvent(QKeyEvent *e) override;
+    void wheelEvent(QWheelEvent *e) override;
+    bool eventFilter(QObject *, QEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
+
 private:
     bool setCursorKeywordSeletoin(int position, bool findNext);
+    void cursorPositionChanged();
+    void updateHighlightBrackets(const QChar &openChar, const QChar &closeChar);
+    int getFirstVisibleBlockId() const;
 
 private:
+    EditWrapper *m_wrapper;
     QPropertyAnimation *m_scrollAnimation;
 
-    QList<QTextEdit::ExtraSelection> m_keywordSelections;
+    QList<QTextEdit::ExtraSelection> m_findMatchSelections;
+    QTextEdit::ExtraSelection m_beginBracketSelection;
+    QTextEdit::ExtraSelection m_endBracketSelection;
     QTextEdit::ExtraSelection m_currentLineSelection;
-    QTextEdit::ExtraSelection m_cursorKeywordSelection;
+    QTextEdit::ExtraSelection m_findHighlightSelection;
     QTextEdit::ExtraSelection m_wordUnderCursorSelection;
 
     QTextCursor m_highlightWordCacheCursor;
@@ -279,14 +308,24 @@ private:
     QColor m_lineNumbersColor;
     QColor m_currentLineNumberColor;
     QColor m_regionMarkerColor;
-    QColor m_searchHighlightColor;
-    QColor m_searchHighlightBgColor;
     QColor m_selectionColor;
     QColor m_selectionBgColor;
 
     QPoint m_mouseClickPos;
 
     bool m_highlighted = false;
+
+    QTextCharFormat m_bracketMatchFormat;
+    QTextCharFormat m_findMatchFormat;
+    QTextCharFormat m_findHighlightFormat;
+    CursorMode m_cursorMode;
+
+    QMenu *m_hlGroupMenu;
+    QActionGroup *m_hlActionGroup;
+
+    QPoint m_lastTouchBeginPos;
+    QPointer<QTimer> m_updateEnableSelectionByMouseTimer;
+    int m_touchTapDistance = -1;
 };
 
 #endif

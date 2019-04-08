@@ -21,6 +21,7 @@
  */
 
 #include "utils.h"
+#include "widgets/toast.h"
 
 #include <DSettings>
 #include <DSettingsOption>
@@ -36,9 +37,10 @@
 #include <QString>
 #include <QtMath>
 #include <QWidget>
+#include <QStandardPaths>
 #include <KEncodingProber>
 #include <QTextCodec>
-#include <DToast>
+#include <QImageReader>
 
 QT_BEGIN_NAMESPACE
 extern Q_WIDGETS_EXPORT void qt_blurImage(QPainter *p, QImage &blurImage, qreal radius, bool quality, bool alphaOnly, int transposed = 0);
@@ -94,7 +96,7 @@ void Utils::applyQss(QWidget *widget, const QString &qssName)
     file.close();
 }
 
-float codecConfidenceForData(const QTextCodec *codec, const QByteArray &data, const QLocale::Country &country)
+static float codecConfidenceForData(const QTextCodec *codec, const QByteArray &data, const QLocale::Country &country)
 {
     qreal hep_count = 0;
     int non_base_latin_count = 0;
@@ -113,23 +115,34 @@ float codecConfidenceForData(const QTextCodec *codec, const QByteArray &data, co
         switch (ch.script()) {
         case QChar::Script_Hiragana:
         case QChar::Script_Katakana:
-            hep_count += country == QLocale::Japan ? 1.2 : 0.5;
-            unidentification_count += country == QLocale::Japan ? 0 : 0.3;
+            hep_count += (country == QLocale::Japan) ? 1.2 : 0.5;
+            unidentification_count += (country == QLocale::Japan) ? 0 : 0.3;
             break;
         case QChar::Script_Han:
-            hep_count += country == QLocale::China ? 1.2 : 0.5;
-            unidentification_count += country == QLocale::China ? 0 : 0.3;
+            hep_count += (country == QLocale::China) ? 1.2 : 0.5;
+            unidentification_count += (country == QLocale::China) ? 0 : 0.3;
             break;
         case QChar::Script_Hangul:
             hep_count += (country == QLocale::NorthKorea) || (country == QLocale::SouthKorea) ? 1.2 : 0.5;
             unidentification_count += (country == QLocale::NorthKorea) || (country == QLocale::SouthKorea) ? 0 : 0.3;
             break;
+        case QChar::Script_Cyrillic:
+            hep_count += (country == QLocale::Russia) ? 1.2 : 0.5;
+            unidentification_count += (country == QLocale::Russia) ? 0 : 0.3;
+            break;
+        case QChar::Script_Devanagari:
+            hep_count += (country == QLocale::Nepal || country == QLocale::India) ? 1.2 : 0.5;
+            unidentification_count += (country == QLocale::Nepal || country == QLocale::India) ? 0 : 0.3;
+            break;
         default:
-            // full-width character, emoji, 常用标点, 拉丁文补充1
+            // full-width character, emoji, 常用标点, 拉丁文补充1，天城文补充，CJK符号和标点符号（如：【】）
             if ((ch.unicode() >= 0xff00 && ch <= 0xffef)
                     || (ch.unicode() >= 0x2600 && ch.unicode() <= 0x27ff)
                     || (ch.unicode() >= 0x2000 && ch.unicode() <= 0x206f)
-                    || (ch.unicode() >= 0x80 && ch.unicode() <= 0xff)) {
+                    || (ch.unicode() >= 0x80 && ch.unicode() <= 0xff)
+                    || (ch.unicode() >= 0xa8e0 && ch.unicode() <= 0xa8ff)
+                    || (ch.unicode() >= 0x0900 && ch.unicode() <= 0x097f)
+                    || (ch.unicode() >= 0x3000 && ch.unicode() <= 0x303f)) {
                 ++hep_count;
             } else if (ch.isSurrogate() && ch.isHighSurrogate()) {
                 ++i;
@@ -170,7 +183,7 @@ float codecConfidenceForData(const QTextCodec *codec, const QByteArray &data, co
 
 QByteArray Utils::detectEncode(const QByteArray &data, const QString &fileName)
 {
-    // return local encoding if nothing in file.
+    // Return local encoding if nothing in file.
     if (data.isEmpty()) {
         return QTextCodec::codecForLocale()->name();
     }
@@ -185,8 +198,8 @@ QByteArray Utils::detectEncode(const QByteArray &data, const QString &fileName)
     KEncodingProber::ProberType proberType = KEncodingProber::Universal;
 
     if (mimetype_name == QStringLiteral("application/xml")
-        || mimetype_name == QStringLiteral("text/html")
-        || mimetype_name == QStringLiteral("application/xhtml+xml")) {
+            || mimetype_name == QStringLiteral("text/html")
+            || mimetype_name == QStringLiteral("application/xhtml+xml")) {
         const QString &_data = QString::fromLatin1(data);
         QRegularExpression pattern("<\\bmeta.+\\bcharset=(?'charset'\\S+?)\\s*['\"/>]");
 
@@ -261,47 +274,67 @@ QByteArray Utils::detectEncode(const QByteArray &data, const QString &fileName)
         {KEncodingProber::ChineseTraditional, QLocale::China},
         {KEncodingProber::Japanese, QLocale::Japan},
         {KEncodingProber::Korean, QLocale::NorthKorea},
+        {KEncodingProber::Cyrillic, QLocale::Russia},
+        {KEncodingProber::Greek, QLocale::Greece},
         {proberType, QLocale::system().country()}
     };
 
     KEncodingProber prober(proberType);
+    prober.feed(data);
+    float pre_confidence = prober.confidence();
+    QByteArray pre_encoding = prober.encoding();
+
     QTextCodec *def_codec = QTextCodec::codecForLocale();
     QByteArray encoding;
     float confidence = 0;
 
-    for (const auto i : fallback_list) {
+    for (auto i : fallback_list) {
         prober.setProberType(i.first);
         prober.feed(data);
 
-        if (prober.confidence() == 0)
-            continue;
+        float prober_confidence = prober.confidence();
+        QByteArray prober_encoding = prober.encoding();
 
-        if (QTextCodec *codec = QTextCodec::codecForName(prober.encoding())) {
+        if (i.first != proberType && qFuzzyIsNull(prober_confidence)) {
+            prober_confidence = pre_confidence;
+            prober_encoding = pre_encoding;
+        }
+
+confidence:
+        if (QTextCodec *codec = QTextCodec::codecForName(prober_encoding)) {
             if (def_codec == codec)
                 def_codec = nullptr;
 
             float c = codecConfidenceForData(codec, data, i.second);
 
-            if (prober.confidence() > 0.5) {
-                c = c / 2 + prober.confidence() / 2;
+            if (prober_confidence > 0.5) {
+                c = c / 2 + prober_confidence / 2;
             } else {
-                c = c / 3 * 2 + prober.confidence() / 3;
+                c = c / 3 * 2 + prober_confidence / 3;
             }
 
             if (c > confidence) {
                 confidence = c;
-                encoding = prober.encoding();
+                encoding = prober_encoding;
             }
 
             if (i.first == KEncodingProber::ChineseTraditional && c < 0.5) {
                 // test Big5
-                c = codecConfidenceForData(QTextCodec::codecForName("Big5"), data, QLocale::China);
+                c = codecConfidenceForData(QTextCodec::codecForName("Big5"), data, i.second);
 
                 if (c > 0.5 && c > confidence) {
                     confidence = c;
                     encoding = "Big5";
                 }
             }
+        }
+
+        if (i.first != proberType) {
+            // 使用 proberType 类型探测出的结果结合此国家再次做编码检查
+            i.first = proberType;
+            prober_confidence = pre_confidence;
+            prober_encoding = pre_encoding;
+            goto confidence;
         }
     }
 
@@ -310,6 +343,29 @@ QByteArray Utils::detectEncode(const QByteArray &data, const QString &fileName)
     }
 
     return encoding;
+}
+
+QByteArray Utils::getEncode(const QByteArray &data)
+{
+    // try to get HTML header encoding.
+    if (QTextCodec *codecForHtml = QTextCodec::codecForHtml(data, nullptr)) {
+        return codecForHtml->name();
+    }
+
+    QTextCodec *codec = nullptr;
+    KEncodingProber prober(KEncodingProber::Universal);
+    prober.feed(data.constData(), data.size());
+
+    // we found codec with some confidence ?
+    if (prober.confidence() > 0.5) {
+        codec = QTextCodec::codecForName(prober.encoding());
+    }
+
+    if (!codec) {
+        return QByteArray();
+    }
+
+    return codec->name();
 }
 
 bool Utils::fileExists(const QString &path)
@@ -466,13 +522,14 @@ bool Utils::isMimeTypeSupport(const QString &filepath)
     }
 
     // Please check full mime type list from: https://www.freeformatter.com/mime-types-list.html
-    QStringList mimeTypeWhiteList;
-    mimeTypeWhiteList << "application/cmd"
+    QStringList textMimeTypes;
+    textMimeTypes << "application/cmd"
                       << "application/javascript"
                       << "application/json"
                       << "application/pkix-cert"
                       << "application/octet-stream"
                       << "application/sql"
+                      << "application/vnd.apple.mpegurl"
                       << "application/vnd.nokia.qt.qmakeprofile"
                       << "application/vnd.nokia.xml.qt.resource"
                       << "application/x-desktop"
@@ -490,35 +547,89 @@ bool Utils::isMimeTypeSupport(const QString &filepath)
                       << "application/x-subrip"
                       << "application/x-text"
                       << "application/x-trash"
+                      << "application/x-xbel"
                       << "application/x-yaml"
+                      << "application/x-pem-key"
                       << "application/xml"
                       << "application/yaml"
                       << "application/x-zerosize"
-                      << "image/svg+xml";
+                      << "image/svg+xml"
+                      << "application/x-perl"
+                      << "application/x-ruby"
+                      << "application/x-mpegURL"
+                      << "application/x-wine-extension-ini"
+                      << "model/vrml";
 
-    if (mimeTypeWhiteList.contains(mimeType)) {
+    if (textMimeTypes.contains(mimeType)) {
         return true;
     }
 
     return false;
 }
 
+bool Utils::isDraftFile(const QString &filepath)
+{
+    QString draftDir = QDir(QStandardPaths::standardLocations(QStandardPaths::DataLocation).first())
+                                                                            .filePath("blank-files");
+    QString dir = QFileInfo(filepath).dir().absolutePath();
+
+    return draftDir == dir;
+}
+
 void Utils::toast(const QString &message, QWidget *parent)
 {
-    DToast *toast = new DToast(parent);
+    Toast *toast = new Toast(parent);
     int avaliableHeight = parent->height() - toast->height();
     int toastPaddingBottom = qMin(avaliableHeight / 2, 100);
 
-    QObject::connect(toast, &DToast::visibleChanged, parent, [toast] (bool visible) {
+    QObject::connect(toast, &Toast::visibleChanged, parent, [toast] (bool visible) {
         if (visible == false) {
             toast->deleteLater();
         }
     });
 
     toast->setText(message);
-    toast->setIcon(QIcon(Utils::getQrcPath("logo_24.svg")));
+    toast->setIcon(Utils::getQrcPath("logo_24.svg"));
     toast->pop();
 
     toast->move((parent->width() - toast->width()) / 2,
                 avaliableHeight - toastPaddingBottom);
+}
+
+const QStringList Utils::getEncodeList()
+{
+    QStringList encodeList;
+
+    for (int mib : QTextCodec::availableMibs()) {
+        QTextCodec *codec = QTextCodec::codecForMib(mib);
+        QString encodeName = QString(codec->name()).toUpper();
+
+        if (encodeName != "UTF-8" && !encodeList.contains(encodeName)) {
+            encodeList.append(encodeName);
+        }
+    }
+
+    encodeList.sort();
+    encodeList.prepend("UTF-8");
+
+    return encodeList;
+}
+
+QPixmap Utils::renderSVG(const QString &filePath, const QSize &size)
+{
+    QImageReader reader;
+    QPixmap pixmap;
+
+    reader.setFileName(filePath);
+
+    if (reader.canRead()) {
+        const qreal ratio = qApp->devicePixelRatio();
+        reader.setScaledSize(size * ratio);
+        pixmap = QPixmap::fromImage(reader.read());
+        pixmap.setDevicePixelRatio(ratio);
+    } else {
+        pixmap.load(filePath);
+    }
+
+    return pixmap;
 }
